@@ -244,18 +244,70 @@ function winLevel(){
 }
 function renderLv(){var h='';ensureLv(S.unlocked+1);var st=Math.max(0,S.unlocked-4);LV.slice(st,st+6).forEach(function(L,k){var i=st+k;var ok=i<=S.unlocked;h+='<button class="alt" data-lv="'+i+'"'+(ok?'':' disabled')+' style="padding:6px 12px;margin:3px;font-size:13px'+(i===cur?';background:var(--accent);color:#04121a':'')+'">'+(ok?(i+1):'🔒')+'</button>';});$('lvs').innerHTML=h+'<p>'+LV[cur].n+', boss: '+LV[cur].boss+'</p>';}
 $('lvs').addEventListener('click',function(e){var b=e.target.closest('button');if(b&&!b.disabled){cur=+b.dataset.lv;theme();renderLv();}});
-var dbx=null,uid=null,myBest=0,rows=[];
+var DEFAULT_RANKS=[
+  {name:'Apex Runner',best:3200,lv:5},
+  {name:'Neon Racer',best:2400,lv:4},
+  {name:'Cyber Blade',best:1750,lv:3},
+  {name:'Pulse',best:1100,lv:2},
+  {name:'Vortex',best:600,lv:1}
+];
+function getScores(){
+  try{
+    var raw=localStorage.getItem('wr_lb_v1');
+    if(raw){var parsed=JSON.parse(raw);if(Array.isArray(parsed)&&parsed.length)return parsed;}
+  }catch(e){}
+  return DEFAULT_RANKS.slice();
+}
+function saveScores(list){
+  try{localStorage.setItem('wr_lb_v1',JSON.stringify(list));}catch(e){}
+}
+function addLocalScore(name,sc,lv){
+  var list=getScores();
+  var playerName=(name&&name.trim())||'Player';
+  var entry=null;
+  for(var i=0;i<list.length;i++){
+    if(list[i].isLocal||list[i].name.toLowerCase()===playerName.toLowerCase()){entry=list[i];break;}
+  }
+  if(entry){
+    entry.name=playerName;entry.isLocal=true;
+    if(sc>(entry.best||0)){entry.best=sc;entry.lv=Math.max(entry.lv||0,lv);entry.t=Date.now();}
+  }else{
+    list.push({name:playerName,best:sc,lv:lv,isLocal:true,t:Date.now()});
+  }
+  list.sort(function(a,b){return (b.best||0)-(a.best||0);});
+  list=list.slice(0,10);
+  saveScores(list);
+  rows=list;
+}
+var dbx=null,uid=null,myBest=0,rows=getScores();
+if(S.best>0)addLocalScore(S.nick||'Player',S.best,S.unlocked);
+
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]});}
-function renderLb(){var h='<h1>Ranks</h1>';if(!dbx)h+='<p>The shared leaderboard works when you open this page signed in to claude.ai.</p>';else if(!rows.length)h+='<p>No scores yet. Be the first!</p>';
-  rows.forEach(function(r,i){h+='<div class="row"><div><b>'+(i+1)+'. '+esc(r.name||'Player')+(r.id===uid?' (you)':'')+'</b><span>Level reached '+((r.lv||0)+1)+'</span></div><b>'+Math.floor(r.best||0)+'</b></div>';});
-  $('lb').innerHTML=h+'<button id="lbback" class="alt">Back</button>';}
-function submit(){if(!dbx||!uid)return;var sc=Math.floor(score),nb=Math.max(myBest,sc);dbx.doc('scores/'+uid).set({name:S.nick||'Player',best:nb,lv:S.unlocked,t:Date.now()}).then(function(){myBest=nb;}).catch(function(){});}
+function renderLb(){
+  if(!dbx)rows=getScores();
+  var h='<h1>Ranks</h1>';
+  if(!rows.length)h+='<p>No scores yet. Play a run to get on the board!</p>';
+  var myName=(S.nick||'Player').trim().toLowerCase();
+  rows.forEach(function(r,i){
+    var isYou=r.isLocal||(uid&&r.id===uid)||(r.name&&r.name.trim().toLowerCase()===myName);
+    h+='<div class="row"><div><b>'+(i+1)+'. '+esc(r.name||'Player')+(isYou?' <span style="color:var(--accent);font-size:12px;font-weight:600">(you)</span>':'')+'</b><span>Level reached '+((r.lv||0)+1)+'</span></div><b>'+Math.floor(r.best||0)+'</b></div>';
+  });
+  h+='<button id="lbback" class="alt">Back</button>';
+  $('lb').innerHTML=h;
+}
+function submit(){
+  var sc=Math.floor(score);
+  if(sc>0)addLocalScore(S.nick||'Player',sc,S.unlocked);
+  if(!dbx||!uid)return;
+  var nb=Math.max(myBest,sc);
+  dbx.doc('scores/'+uid).set({name:S.nick||'Player',best:nb,lv:S.unlocked,t:Date.now()}).then(function(){myBest=nb;}).catch(function(){});
+}
 (async function(){try{if(!window.claude)return;var u=await claude.use('user'),d=await claude.use('db');if(!u||!d)return;uid=await u.id();dbx=d;
   d.doc('scores/'+uid).get().then(function(s){if(s.exists)myBest=s.data().best||0;}).catch(function(){});
   d.collection('scores').orderBy('best','desc').limit(10).onSnapshot(function(s){rows=s.docs.map(function(x){var v=x.data();v.id=x.id;return v;});renderLb();},function(){});}catch(e){}})();
 $('lbbtn').addEventListener('click',function(){renderLb();$('home').style.display='none';$('lb').style.display='block';});
 $('lb').addEventListener('click',function(e){if(e.target.id==='lbback'){$('lb').style.display='none';$('home').style.display='block';}});
-$('nick').addEventListener('input',function(){S.nick=this.value.slice(0,12);save();});
+$('nick').addEventListener('input',function(){S.nick=this.value.slice(0,12);save();if(S.best>0)addLocalScore(S.nick||'Player',S.best,S.unlocked);});
 function spawn(){
   var l=Math.floor(Math.random()*3);
   if(Math.random()<0.1){var pk=['mg','sh','sm'][Math.floor(Math.random()*3)],po=new THREE.Mesh(puGeo,puMat[pk]);po.position.set(LANES[l],1.1,-85);po.userData={type:'pu',k:pk};scene.add(po);items.push(po);return;}
